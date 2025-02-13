@@ -41,9 +41,12 @@ int main(int argc, char *argv[])
 
     QCommandLineParser parser;
     QCommandLineOption helpOption = parser.addHelpOption();
-    parser.addPositionalArgument("originalFrames", "Original frame directory");
-    parser.addPositionalArgument("processedFrames", "Processed frames directory");
-    parser.addPositionalArgument("stabilizedFrames", "Output directory for stabilized frames");
+    parser.addPositionalArgument("originalFrames", "Original frame dat fie");
+    parser.addPositionalArgument("processedFrames", "Processed frames dat file");
+    parser.addPositionalArgument("stabilizedFrames", "Output dat file for stabilized frames");
+    parser.addPositionalArgument("height", "Height of the frames (integer)");
+    parser.addPositionalArgument("width", "Width of the frames (integer)");
+    parser.addPositionalArgument("frameCount", "Number of frames to process (integer)");
 
     QCommandLineOption computeOption(QStringList() << "c" << "compute",
             QCoreApplication::translate("main", "Compute optical flow using <model>. One of ['pwcnet', 'pwcnet-light']"),
@@ -106,7 +109,21 @@ int main(int argc, char *argv[])
         return 1;  
     }
 
+    bool heightOk, widthOk, frameCountOk;
+    int height = args.at(3).toInt(&heightOk);
+    int width = args.at(4).toInt(&widthOk);
+    int frameCount = args.at(5).toInt(&frameCountOk);
 
+    // Ensure all three are positive integers
+    if (!heightOk || !widthOk || !frameCountOk || height <= 0 || width <= 0 || frameCount <= 0) {
+        std::cerr << "Error: Height, width, and frameCount must be positive integers." << std::endl;
+        return 1;
+    }
+
+
+    /*
+        these are dat files not directories
+    */
     qDebug() << args;
     QString originalFrameDir = args.at(0);
     QString processedFrameDir = args.at(1);
@@ -115,6 +132,11 @@ int main(int argc, char *argv[])
     
     std::optional<QString> opticalFlowDir = parser.isSet(flowDirectoryOption) ? std::make_optional(parser.value(flowDirectoryOption)) : std::nullopt;
     std::optional<QString> computeModel = parser.isSet(computeOption) ?  std::make_optional(parser.value(computeOption)) : std::nullopt;
+
+    //checking if the inputs are dat files or directories
+    QString origSuffix = QFileInfo(originalFrameDir).suffix().toLower();
+    QString procSuffix = QFileInfo(processedFrameDir).suffix().toLower();
+    QString stabSuffix = QFileInfo(stabilizedFrameDir).suffix().toLower();
 
     // check that originalFrameDir and processedFrameDir both exist and are directories or both video files
     if (!QFileInfo(originalFrameDir).exists()) {
@@ -126,6 +148,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    bool isMemmapMode = (origSuffix == "dat" && procSuffix == "dat" && stabSuffix == "dat");
     bool originalIsDir = QFileInfo(originalFrameDir).isDir();
     bool processedIsDir = QFileInfo(processedFrameDir).isDir();
     if (originalIsDir != processedIsDir) {
@@ -133,8 +156,23 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-
-    if (originalIsDir) {
+    if (isMemmapMode) {
+        qDebug() << "USING THE MEM-MAP MODE";
+        FileStabilizer fs(
+            originalFrameDir.toStdString(),
+            processedFrameDir.toStdString(),
+            stabilizedFrameDir.toStdString(),
+            opticalFlowDir,
+            computeModel,
+            width,
+            height,
+            frameCount,
+            batchSize,
+            parser.isSet(computeOption)
+        );
+        return fs.stabilizeAll();
+    }
+    else if (originalIsDir) {
         auto inpname = QDir(originalFrameDir).entryList(QStringList({"*.png", "*.jpg"}), QDir::Files, QDir::Name)[0];
         auto inputfirst = QDir(originalFrameDir).filePath(inpname); 
         auto out = inputfirst.toStdString();
@@ -148,9 +186,11 @@ int main(int argc, char *argv[])
 
         qDebug() << "USING FILE STABILIZER";
         // FileStabilizer fs(originalFrameDir, processedFrameDir, stabilizedFrameDir, opticalFlowDir, computeModel, width, height, batchSize, parser.isSet(computeOption), configPath);
-        FileStabilizer fs(originalFrameDir, processedFrameDir, stabilizedFrameDir, opticalFlowDir, computeModel, width, height, batchSize, parser.isSet(computeOption));
+        // although this condition is noit going to be use bust still have to pass the names as strings now since the finction expects them that way.
+        FileStabilizer fs(originalFrameDir.toStdString(), processedFrameDir.toStdString(), stabilizedFrameDir.toStdString(), opticalFlowDir, computeModel, width, height, frameCount, batchSize, parser.isSet(computeOption));
         return fs.stabilizeAll();
-    } else {
+    } 
+    else {
         auto inputVideo = QDir(originalFrameDir);
         if (!QFileInfo(originalFrameDir).isFile()) {
             std::cerr << "Input video has to be a file." << std::endl;

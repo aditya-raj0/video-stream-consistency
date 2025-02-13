@@ -1,3 +1,5 @@
+# this is a demo testing script so everything in this is random
+
 import os
 import subprocess
 import time
@@ -33,17 +35,17 @@ if __name__ == "__main__":
     processed_frame_dir = '/home/adity/data/VSC_data/processed/6_processed'
     generated_frame_dir = '/home/adity/data/VSC_data/generation/6_light_thrice_generated_downscale4_config_def'
 
-    run_flow_consistency(gt_frame_dir, processed_frame_dir, generated_frame_dir, downscalingfactor=4)
+    run_flow_consistency(gt_frame_dir, processed_frame_dir, generated_frame_dir, downscalingfactor=None)
 
-    frames_to_video(
-        frames_dir = generated_frame_dir,
-        output_video_path = os.path.join(generated_frame_dir, generated_frame_dir.split('/')[-1] + '.mp4'),
-        fps = 30
-    )
+    # frames_to_video(
+    #     frames_dir = generated_frame_dir,
+    #     output_video_path = os.path.join(generated_frame_dir, generated_frame_dir.split('/')[-1] + '.mp4'),
+    #     fps = 30
+    # )
 
-    save_video_frames(
-        video_path= os.path.join(generated_frame_dir, generated_frame_dir.split('/')[-1] + '.mp4'),
-        destination_dir='home/adity/processed_once'
-    )
+    # save_video_frames(
+    #     video_path= os.path.join(generated_frame_dir, generated_frame_dir.split('/')[-1] + '.mp4'),
+    #     destination_dir='home/adity/processed_once'
+    # )
 
-    run_flow_consistency(gt_frame_dir, 'home/adity/processed_once', 'home/adity/generated_twice')
+    # run_flow_consistency(gt_frame_dir, 'home/adity/processed_once', 'home/adity/generated_twice')

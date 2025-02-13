@@ -24,6 +24,13 @@ class FileStabilizer : protected VideoStabilizer
         std::optional<QDir> opticalFlowDir;
         std::optional<pathInputs> inputPaths;
         int frameCount;
+        std::string originalMemmapPath;
+        std::string processedMemmapPath;
+        std::string stabilizedMemmapPath;
+        int frameSize;
+        uint8_t* originalMemmap;
+        uint8_t* processedMemmap;
+        uint8_t* stabilizedMemmap;
     protected:
         QString formatIndex(int index);
         bool loadFrame(int i);
@@ -33,7 +40,11 @@ class FileStabilizer : protected VideoStabilizer
         // FileStabilizer(QDir originalFrameDir, QDir processedFrameDir, QDir stabilizedFrameDir, std::optional<QDir> opticalFlowDir, 
         //                 std::optional<QString> modelType, int width, int height, int batchSize, bool computeOpticalFlow,
         //                 const QString &configFilePath);
-        FileStabilizer(QDir originalFrameDir, QDir processedFrameDir, QDir stabilizedFrameDir, std::optional<QDir> opticalFlowDir, 
-                        std::optional<QString> modelType, int width, int height, int batchSize, bool computeOpticalFlow);
+        // FileStabilizer(QDir originalFrameDir, QDir processedFrameDir, QDir stabilizedFrameDir, std::optional<QDir> opticalFlowDir, 
+        //                 std::optional<QString> modelType, int width, int height, int batchSize, bool computeOpticalFlow);
+        FileStabilizer(std::string originalMemmapPath, std::string processedMemmapPath, std::string stabilizedMemmapPath,
+                        std::optional<QDir> opticalFlowDir, std::optional<QString> modelType,
+                        int width, int height, int batchSize, int frameCount, bool computeOpticalFlow);
+
         bool stabilizeAll();
 };

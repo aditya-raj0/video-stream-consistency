@@ -22,19 +22,19 @@ class memmap_tc_pipeline():
 
         self.num_frames = len(orignal_files)
         self.height, self.width = cv2.imread(orignal_files[0]).shape[:2]
-        self.channels = 3 # THIS IS ASSUMING THAT THE FRAMES IN THE DIRS ARE 3 CHANNEL AND NOT 4
+        self.intiial_channels = 3 # THIS IS ASSUMING THAT THE FRAMES IN THE DIRS ARE 3 CHANNEL AND NOT 4
 
         orignal_memmap = np.memmap(
             filename=orignal_dat_file_path,
             dtype=np.uint8,
             mode='w+',
-            shape=(self.num_frames, self.height, self.width, self.channels)
+            shape=(self.num_frames, self.height, self.width, self.intiial_channels)
         )
         processed_memmap = np.memmap(
             filename=processed_dat_file_path,
             dtype=np.uint8,
             mode='w+',
-            shape=(self.num_frames, self.height, self.width, self.channels)
+            shape=(self.num_frames, self.height, self.width, self.intiial_channels)
         )
 
         for i, (orignal_path, processed_path) in enumerate(zip(orignal_files, processed_files)):
@@ -51,11 +51,12 @@ class memmap_tc_pipeline():
     
 
     def dat_to_frames(self, dat_file_path:str, output_dir:str):
+        self.final_channels = 4
         output_memmap = np.memmap(
             filename=dat_file_path,
             dtype=np.uint8,
             mode = 'r',
-            shape=(self.num_frames, self.height, self.width, self.channels)
+            shape=(self.num_frames, self.height, self.width, self.final_channels)
         )
 
         os.makedirs(output_dir, exist_ok=True)
@@ -68,16 +69,16 @@ class memmap_tc_pipeline():
         print('DONE')
     
 
-    
+    def basic_flow_consistency_run(gt_frame_dir:str, processed_frame_dir:str, generated_frame_dir:str, downscalingfactor:int = None):
+        pass
 
 
 if __name__ == "__main__":
     
     x = memmap_tc_pipeline()
     x.frames_to_dat(
-        orignal_frame_dir = '',
-        processed_frame_dir = '',
-        orignal_dat_file_path = '',
-        processed_dat_file_path = '',
-
+        orignal_frame_dir = '/home/adity/data/VSC_data/input/6_GT',
+        processed_frame_dir = '/home/adity/data/VSC_data/processed/6_processed',
+        orignal_dat_file_path = '/home/adity/data/VSC_data/generation_memmap/g_GT.dat',
+        processed_dat_file_path = '/home/adity/data/VSC_data/generation_memmap/6_processed.dat',
     )

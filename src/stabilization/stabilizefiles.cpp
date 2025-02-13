@@ -31,70 +31,79 @@
 #include <QList>
 #include <QElapsedTimer>
 
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <stdexcept>
+
 #define WARMUP_FRAMES (k+5)
 
 // FileStabilizer::FileStabilizer(QDir originalFrameDir, QDir processedFrameDir, QDir stabilizedFrameDir, std::optional<QDir> opticalFlowDir,  
 //     std::optional<QString> modelType, int width, int height, int batchSize, bool computeOpticalFlow,
 //     const QString &configFilePath):
-FileStabilizer::FileStabilizer(QDir originalFrameDir, QDir processedFrameDir, QDir stabilizedFrameDir, std::optional<QDir> opticalFlowDir,  
-    std::optional<QString> modelType, int width, int height, int batchSize, bool computeOpticalFlow):
-    VideoStabilizer(width, height, batchSize,  modelType, computeOpticalFlow), originalFrameDir(originalFrameDir), 
-    processedFrameDir(processedFrameDir), stabilizedFrameDir(stabilizedFrameDir), opticalFlowDir(opticalFlowDir)
+FileStabilizer::FileStabilizer(std::string origPath, std::string procPath, std::string stabPath, 
+    std::optional<QDir> opticalFlowDir, std::optional<QString> modelType, 
+    int width, int height, int batchSize, int frameCount, bool computeOpticalFlow) :
+    VideoStabilizer(width, height, batchSize, modelType, computeOpticalFlow),
+    originalMemmapPath(origPath), 
+    processedMemmapPath(procPath), 
+    stabilizedMemmapPath(stabPath),
+    opticalFlowDir(opticalFlowDir)
 {
-    qDebug() << originalFrameDir.absolutePath();
-    if (!originalFrameDir.exists()) {
-        throw std::runtime_error("Original frame dir does not exist!");
-    }
-    if (!processedFrameDir.exists()) {
-        throw std::runtime_error("Processed frame dir does not exist!");
-    }
-
-    if (opticalFlowDir && !opticalFlowDir->exists()) {
-        throw std::runtime_error("Optical flow dir does not exist!");
-    }
-
-
-    // gather input files
-    QStringList originalFramePaths, processedFramePaths;
-    for (QString name : originalFrameDir.entryList(QStringList({"*.png", "*.jpg"}), QDir::Files, QDir::Name)) {
-        originalFramePaths << originalFrameDir.filePath(name);
-    }
-    for (QString name : processedFrameDir.entryList(QStringList({"*.png", "*.jpg"}), QDir::Files, QDir::Name)) {
-        processedFramePaths << processedFrameDir.filePath(name);
-    }
-    frameCount = std::min(originalFramePaths.size(), processedFramePaths.size());
-    Q_ASSERT(frameCount <= originalFramePaths.size());
-    Q_ASSERT(frameCount <= processedFramePaths.size());
-
-    inputPaths = std::make_optional(pathInputs{originalFramePaths,processedFramePaths, frameCount});
+    frameSize = width * height * 3;
+    // Calculate frameCount by dividing total file size by frame size
+    // struct stat sb;
+    // if (stat(originalMemmapPath.c_str(), &sb) == 0) {
+    //     frameCount = sb.st_size / frameSize;
+    //     qDebug() << "Calculated frameCount:" << frameCount;
+    // } else {
+    //     throw std::runtime_error("Failed to get file size for frameCount calculation.");
+    // }
     
-    stabilizedFrameDir.mkpath(".");
 
-}
+    int fd_orig = open(originalMemmapPath.c_str(), O_RDONLY);
+    int fd_proc = open(processedMemmapPath.c_str(), O_RDONLY);
+    int fd_stab = open(stabilizedMemmapPath.c_str(), O_RDWR);
+
+    if (fd_orig == -1 || fd_proc == -1 || fd_stab == -1) {
+        throw std::runtime_error("Failed to open one or more memmap files");
+    }
+
+    originalMemmap = static_cast<uint8_t*>(mmap(nullptr, frameSize * frameCount, PROT_READ, MAP_SHARED, fd_orig, 0));
+    processedMemmap = static_cast<uint8_t*>(mmap(nullptr, frameSize * frameCount, PROT_READ, MAP_SHARED, fd_proc, 0));
+    stabilizedMemmap = static_cast<uint8_t*>(mmap(nullptr, frameSize * frameCount, PROT_WRITE, MAP_SHARED, fd_stab, 0));
+
+
+    if (originalMemmap == MAP_FAILED || processedMemmap == MAP_FAILED || stabilizedMemmap == MAP_FAILED) {
+        throw std::runtime_error("Failed to mmap one or more files");
+    }
+
+    close(fd_orig);
+    close(fd_proc);
+    close(fd_stab);
+} 
 
 bool FileStabilizer::loadFrame(int i)
 {
-    if (i < 0 || i >= inputPaths->originalFramePaths.size() || i >= inputPaths->processedFramePaths.size()) {
-        // probably reached end of video
-        return false;
-    }
+    if (i < 0 || i >= frameCount) return false;
 
-    if (!QFile::exists(inputPaths->originalFramePaths[i])) {
-        qWarning() << "Original frame path does not exist:" << inputPaths->originalFramePaths[i];
-        return false;
-    }
+    size_t orig_offset = i * frameSize;
+    size_t proc_offset = i * frameSize;
 
-    if (!QFile::exists(inputPaths->processedFramePaths[i])) {
-        qWarning() << "Processed frame path does not exist:" << inputPaths->processedFramePaths[i];
-        return false;
-    }
+    // Create QImages using the memory from the memmap (No deep copy)
+    QImage originalImg((uchar*)&originalMemmap[orig_offset], width, height, QImage::Format_RGB888);
+    QImage processedImg((uchar*)&processedMemmap[proc_offset], width, height, QImage::Format_RGB888);
 
-    QSharedPointer<QImage> image(new QImage(QImage(inputPaths->originalFramePaths[i]).scaled(width, height)));
-    originalFramesQt << image;
-    originalFrames << imageToGPU(*image.get());
-    QImage imageProcessed;
-    imageProcessed.load(inputPaths->processedFramePaths[i]);
-    processedFrames << imageToGPU(imageProcessed.scaled(width, height));
+    // Convert to RGBA8888 for internal processing
+    QImage originalRGBA = originalImg.convertToFormat(QImage::Format_RGBA8888);
+    QImage processedRGBA = processedImg.convertToFormat(QImage::Format_RGBA8888);
+
+    // Store frames for processing
+    originalFramesQt << QSharedPointer<QImage>(new QImage(originalRGBA));
+    originalFrames << imageToGPU(originalRGBA);
+    processedFrames << imageToGPU(processedRGBA);
+
     return true;
 }
 
@@ -115,19 +124,40 @@ QString FileStabilizer::formatIndex(int index) {
 */
 
 void FileStabilizer::outputFrame(int i, QSharedPointer<QImage> q) {
-    QImage img = q->convertToFormat(QImage::Format_RGB32);
-    img.save(stabilizedFrameDir.filePath(formatIndex(i) + ".png"));
-    // q->save(stabilizedFrameDir.filePath(formatIndex(i) + ".png"));
+    size_t offset = i * frameSize;
+
+    // Convert the stabilized frame to RGB888 before writing
+    QImage img = q->convertToFormat(QImage::Format_RGB888);
+    memcpy(&stabilizedMemmap[offset], img.bits(), frameSize);
 }
 
 
 bool FileStabilizer::stabilizeAll() {
-    preloadProcessedFrames();
+    if (originalMemmap && processedMemmap) {
+        qDebug() << "Using memmap mode for stabilization";
+        // Preload the first set of frames from the memmap files
+        for (int j = 0; j < 2*k+batchSize; j++) {
+            qDebug() << "Preloading frame" << j;
+            bool success = loadFrame(j); 
+            if (!success) {
+                throw std::runtime_error("Failed to preload initial frames from memmap!");
+            }
+            
+            // Write first k processed frames to output memmap
+            if (j <= k) {
+                auto output = QSharedPointer<QImage>(new QImage(gpuToImage(*processedFrames[j])));
+                outputFrame(j, output);
+            }
+        }
+        lastStabilizedFrame.copyFrom(*processedFrames.back());
+    }
+    else {
+        // Fallback to original directory-based logic
+        preloadProcessedFrames();
+    }
+
     std::cout << "Starting stabilization..." << std::endl;
     for (int i = k;; i++) {
-        // i is the frame to process now
-        // k frames before, frame i, k frames after are supposed to be in original/processedFrames list
-        // e.g. originalFrames and processedFrames contain 2*k+1 frames, current frame i here is frame k in these lists
         timer.start();
         bool success = doOneStep(i); 
         if (!success) {
@@ -136,11 +166,12 @@ bool FileStabilizer::stabilizeAll() {
 
         if (i == 100+WARMUP_FRAMES) {
             int count = i - WARMUP_FRAMES;
-            qDebug() << "Per-frame time in ms averaged over 100 frames (without first 5 for warmup):" << "load (wait+to_gpu): " << 
-                timeLoad / float(count) << "optflow: " << timeOptFlow  / float(count)  <<
-                "save: " << timeSave / float(count) << 
-                "stabilize: " <<  timeStabilized / float(count) << 
-                "overall: " << (timeLoad + timeOptFlow + timeStabilized + timeSave) / float(count);
+            qDebug() << "Per-frame time in ms averaged over 100 frames (without first 5 for warmup):" 
+                << "load (wait+to_gpu): " << timeLoad / float(count) 
+                << "optflow: " << timeOptFlow  / float(count)
+                << "save: " << timeSave / float(count) 
+                << "stabilize: " << timeStabilized / float(count) 
+                << "overall: " << (timeLoad + timeOptFlow + timeStabilized + timeSave) / float(count);
         }
     }
     return true;
